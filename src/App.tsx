@@ -667,20 +667,22 @@ export default function SeatBridge() {
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={compareData.rows as any} margin={{ top: 25, right: 20, left: -10, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
-                <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -2, fill: "var(--muted)", fontSize: 11 }} />
-                <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" domain={[0, 100]} />
+              <BarChart data={compareData.rows as any} margin={{ top: 35, right: 20, left: -10, bottom: 10 }} barSize={52}>
+                <CartesianGrid strokeDasharray="3 3" stroke="rgba(255,255,255,0.05)" vertical={false} />
+                <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -10, fill: "var(--muted)", fontSize: 12 }} axisLine={false} tickLine={false} />
+                <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" domain={[0, 100]} axisLine={false} tickLine={false} />
                 <Tooltip
-                  contentStyle={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--text)" }}
+                  cursor={{ fill: "rgba(255,255,255,0.03)" }}
+                  contentStyle={{ background: "rgba(15, 22, 38, 0.85)", backdropFilter: "blur(12px)", border: "1px solid rgba(255,255,255,0.1)", borderRadius: 8, color: "var(--text)", boxShadow: "0 4px 16px rgba(0,0,0,0.5)" }}
+                  itemStyle={{ fontSize: 13, fontWeight: 500 }}
                   formatter={(v: any) => `${v}%`}
                 />
-                <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
-                <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" />
-                <Bar dataKey="Partial + General" stackId="a" fill="var(--warn)" />
-                <Bar dataKey="Full General" stackId="a" fill="var(--warn2)" />
-                <Bar dataKey="Still Waitlisted" stackId="a" fill="var(--bad)">
-                  <LabelList dataKey="revenue" position="top" formatter={(v: any) => `₹${v.toLocaleString("en-IN")}`} fill="var(--muted)" fontSize={10} />
+                <Legend wrapperStyle={{ fontSize: 13, color: "var(--muted)", paddingTop: 20 }} iconType="circle" />
+                <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" radius={[4, 4, 4, 4]} stroke="var(--panel)" strokeWidth={3} />
+                <Bar dataKey="Partial + General" stackId="a" fill="var(--warn)" radius={[4, 4, 4, 4]} stroke="var(--panel)" strokeWidth={3} />
+                <Bar dataKey="Full General" stackId="a" fill="var(--warn2)" radius={[4, 4, 4, 4]} stroke="var(--panel)" strokeWidth={3} />
+                <Bar dataKey="Still Waitlisted" stackId="a" fill="var(--bad)" radius={[4, 4, 4, 4]} stroke="var(--panel)" strokeWidth={3}>
+                  <LabelList dataKey="revenue" position="top" formatter={(v: any) => `₹${v.toLocaleString("en-IN")}`} fill="var(--text)" fontSize={12} fontWeight={600} offset={12} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
