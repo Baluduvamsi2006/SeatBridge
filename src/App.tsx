@@ -197,6 +197,88 @@ function initialState() {
   return { baselineSeats: seatsAfterBaseline, waitlist };
 }
 
+/* ----------------------------------------------------------------------
+   SIMULATION
+---------------------------------------------------------------------- */
+function simulate(baselineSeats, waitlist, k, generalOn) {
+  const pool = cloneSeats(baselineSeats);
+  const results = [];
+
+  waitlist.forEach((p) => {
+    if (k === 0 && generalOn) {
+      results.push({ id: p.id, from: p.from, to: p.to, status: "general-full", used: [], coveredHours: 0 });
+      return;
+    }
+    const maxSeats = k + 1;
+    const res = coverJourney(pool, p.from, p.to, maxSeats);
+    if (res.success) {
+      results.push({ id: p.id, from: p.from, to: p.to, status: "confirmed", used: res.used });
+    } else if (generalOn) {
+      const gotAny = res.coveredTo > p.from;
+      results.push({
+        id: p.id,
+        from: p.from,
+        to: p.to,
+        status: gotAny ? "general-partial" : "general-full",
+        used: res.used,
+        coveredTo: res.coveredTo,
+      });
+    } else {
+      // roll back nothing needed: partial consumption for a failed,
+      // non-general passenger still represents real seats they'd hold if
+      // we let them — since they refuse general and aren't confirmed, give
+      // those fragments back to the pool.
+      res.used.forEach((seg) => {
+        const seat = pool.find((s) => s.uid === seg.uid);
+        seat.free.push({ start: seg.from, end: seg.to });
+        seat.free.sort((a, b) => a.start - b.start);
+        mergeAdjacent(seat);
+      });
+      results.push({ id: p.id, from: p.from, to: p.to, status: "waitlisted", used: [] });
+    }
+  });
+
+  const confirmed = results.filter((r) => r.status === "confirmed");
+  const genPartial = results.filter((r) => r.status === "general-partial");
+  const genFull = results.filter((r) => r.status === "general-full");
+  const stillWL = results.filter((r) => r.status === "waitlisted");
+
+  const hoursOf = (idx) => STATIONS[idx].hour;
+  let newlyFilledHours = 0;
+  confirmed.forEach((r) => (newlyFilledHours += hoursOf(r.to) - hoursOf(r.from)));
+  genPartial.forEach((r) => (newlyFilledHours += hoursOf(r.coveredTo) - hoursOf(r.from)));
+
+  let revenue = 0;
+  [...confirmed, ...genPartial].forEach((r) => {
+    if (r.used.length) revenue += FARE[r.used[0].type];
+  });
+
+  const avgGeneralHrs =
+    genPartial.length > 0
+      ? genPartial.reduce((sum, r) => sum + (hoursOf(r.to) - hoursOf(r.coveredTo)), 0) / genPartial.length
+      : 0;
+
+  return {
+    k,
+    generalOn,
+    pool,
+    results,
+    metrics: {
+      total: waitlist.length,
+      confirmed: confirmed.length,
+      genPartial: genPartial.length,
+      genFull: genFull.length,
+      stillWL: stillWL.length,
+      confirmRate: (confirmed.length / waitlist.length) * 100,
+      coveredRate: ((confirmed.length + genPartial.length + genFull.length) / waitlist.length) * 100,
+      newlyFilledHours,
+      utilizationExtra: (newlyFilledHours / TOTAL_CAPACITY_HOURS) * 100,
+      revenue,
+      avgGeneralHrs,
+    },
+  };
+}
+
 function mergeAdjacent(seat) {
   seat.free.sort((a, b) => a.start - b.start);
   const merged = [];
@@ -213,7 +295,7 @@ function mergeAdjacent(seat) {
 export default function SeatBridge() {
   return (
     <div className="sb-root">
-      <h1>SeatBridge booking logic</h1>
+      <h1>SeatBridge simulation engine</h1>
     </div>
   );
 }
