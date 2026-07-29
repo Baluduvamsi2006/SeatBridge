@@ -368,6 +368,38 @@ export default function SeatBridge() {
   const dConfirmRate = m && prevMetrics ? m.confirmRate - prevMetrics.confirmRate : null;
   const dCoveredRate = m && prevMetrics ? m.coveredRate - prevMetrics.coveredRate : null;
 
+  const filteredWL = useMemo(() => {
+    const list = applied ? applied.results : base.waitlist.map((p) => ({ ...p, status: "waitlisted", used: [] }));
+    if (!wlFilter.trim()) return list;
+    const f = wlFilter.trim().toUpperCase();
+    return list.filter(
+      (r) =>
+        r.id.includes(f) ||
+        stCode(r.from).includes(f) ||
+        stCode(r.to).includes(f) ||
+        (STATUS_META[r.status]?.label || "").toUpperCase().includes(f)
+    );
+  }, [applied, base, wlFilter]);
+
+  const berthRows = useMemo(() => {
+    const rows = [];
+    displaySeats
+      .filter((s) => s.type === coachTab)
+      .forEach((s) => {
+        s.free.forEach((f) => {
+          rows.push({ uid: s.uid, coach: s.coach, berth: s.berth, from: f.start, to: f.end });
+        });
+      });
+    rows.sort((a, b) => (a.coach === b.coach ? a.berth - b.berth : a.coach.localeCompare(b.coach)));
+    if (!berthFilter.trim()) return rows;
+    const f = berthFilter.trim().toUpperCase();
+    return rows.filter(
+      (r) => r.coach.includes(f) || String(r.berth).includes(f) || stCode(r.from).includes(f) || stCode(r.to).includes(f)
+    );
+  }, [displaySeats, coachTab, berthFilter]);
+
+  const heatmapCoaches = COACHES.filter((c) => c.type === coachTab);
+
   return (
     <div className="sb-root">
       <style>{CSS}</style>
@@ -581,6 +613,60 @@ export default function SeatBridge() {
           </table>
         </div>
       </section>
+
+      {/* ---------- WAITLIST TABLE ---------- */}
+      <section className="sb-card">
+        <div className="sb-card-title-row">
+          <div className="sb-card-title">Waitlisted passengers ({base.waitlist.length})</div>
+          <div className="sb-search">
+            <Search size={14} />
+            <input placeholder="search id, station, status…" value={wlFilter} onChange={(e) => setWlFilter(e.target.value)} />
+          </div>
+        </div>
+        <div className="sb-table-wrap tall">
+          <table className="sb-table">
+            <thead>
+              <tr>
+                <th>ID</th>
+                <th>Requested route</th>
+                <th>Status</th>
+                <th>Detail</th>
+              </tr>
+            </thead>
+            <tbody>
+              {filteredWL.map((r) => {
+                const meta = STATUS_META[r.status];
+                const Icon = meta.Icon;
+                let detail = "—";
+                if (r.status === "confirmed") detail = `${r.used.length} seat${r.used.length > 1 ? "s" : ""}: ${r.used.map((u) => u.uid).join(" → ")}`;
+                if (r.status === "general-partial") {
+                  const genHrs = STATIONS[r.to].hour - STATIONS[r.coveredTo].hour;
+                  const pctGen = (genHrs / (STATIONS[r.to].hour - STATIONS[r.from].hour)) * 100;
+                  detail = `${r.used.length} seat${r.used.length > 1 ? "s" : ""} reserved, then ${hrs(genHrs)} (${pct(pctGen)} of trip) in General`;
+                }
+                if (r.status === "general-full") detail = "Entire journey in General class";
+                return (
+                  <tr key={r.id}>
+                    <td className="mono">{r.id}</td>
+                    <td>{stCode(r.from)} → {stCode(r.to)}</td>
+                    <td>
+                      <span className="sb-status" style={{ color: meta.color }}>
+                        <Icon size={14} /> {meta.label}
+                      </span>
+                    </td>
+                    <td className="sb-detail">{detail}</td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
+        </div>
+      </section>
+
+      <footer className="sb-footer">
+        All station names, seat data and passenger records on this page are synthetically generated for
+        demonstration purposes only and are not sourced from IRCTC. Fares are illustrative placeholders.
+      </footer>
     </div>
   );
 }
@@ -759,4 +845,4 @@ const CSS = `
 .sb-empty { text-align: center; color: var(--muted); padding: 20px !important; }
 
 .sb-footer { color: var(--muted); font-size: 11.5px; text-align: center; margin-top: 8px; padding: 10px 0; }
-\`;
+`;
