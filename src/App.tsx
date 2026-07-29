@@ -111,7 +111,7 @@ function mulberry32(seed: number) {
 /* ----------------------------------------------------------------------
    ROUTE
 ---------------------------------------------------------------------- */
-const STATIONS = [
+const STATIONS: Station[] = [
   { code: "GNT", name: "Guntur Jn", hour: 0 },
   { code: "DKD", name: "Donakonda", hour: 1.0 },
   { code: "NRT", name: "Narasaraopet", hour: 2.1 },
@@ -125,7 +125,7 @@ const STATIONS = [
 const N = STATIONS.length;
 const TOTAL_HOURS = STATIONS[N - 1].hour;
 
-const COACHES = [
+const COACHES: Coach[] = [
   { code: "S1", type: "SL", seats: 72 },
   { code: "S2", type: "SL", seats: 72 },
   { code: "S3", type: "SL", seats: 72 },
@@ -161,11 +161,11 @@ function randomFragment(rng: () => number) {
 }
 
 function buildSeats(rng: () => number): Seat[] {
-  const seats = [];
+  const seats: Seat[] = [];
   COACHES.forEach((coach) => {
     for (let berth = 1; berth <= coach.seats; berth++) {
       const roll = rng();
-      let free = [];
+      let free: any[] = [];
       if (roll >= 0.15) {
         free.push(randomFragment(rng));
         // ~22% of seats get a second, disjoint pocket of availability —
@@ -201,10 +201,10 @@ function cloneSeats(seats: Seat[]): Seat[] {
 // removed / split).
 function coverJourney(pool: Seat[], from: number, to: number, maxSeats: number) {
   let current = from;
-  const used = [];
+  const used: any[] = [];
   while (current < to && used.length < maxSeats) {
-    let bestSeat = null;
-    let bestFrag = null;
+    let bestSeat: any = null;
+    let bestFrag: any = null;
     let bestFragIdx = -1;
     pool.forEach((seat) => {
       seat.free.forEach((frag, idx) => {
@@ -217,12 +217,12 @@ function coverJourney(pool: Seat[], from: number, to: number, maxSeats: number) 
         }
       });
     });
-    if (!bestSeat) break;
+    if (!bestSeat || !bestFrag) break;
     const segEnd = Math.min(bestFrag.end, to);
     used.push({ uid: bestSeat.uid, coach: bestSeat.coach, type: bestSeat.type, from: current, to: segEnd });
 
     // consume this piece from the seat's free fragment, splitting as needed
-    const leftovers = [];
+    const leftovers: any[] = [];
     if (bestFrag.start < current) leftovers.push({ start: bestFrag.start, end: current });
     if (segEnd < bestFrag.end) leftovers.push({ start: segEnd, end: bestFrag.end });
     bestSeat.free.splice(bestFragIdx, 1, ...leftovers);
@@ -234,7 +234,7 @@ function coverJourney(pool: Seat[], from: number, to: number, maxSeats: number) 
 
 function buildWaitlist(rng: () => number, seats: Seat[]): WaitlistedPassenger[] {
   const HUBS = [5, 6, 7]; // VKN, ONGL, NLR — intermediate demand hubs
-  const candidates = [];
+  const candidates: any[] = [];
   for (let i = 0; i < CANDIDATE_POOL; i++) {
     const bucket = rng();
     let from, to;
@@ -262,7 +262,7 @@ function buildWaitlist(rng: () => number, seats: Seat[]): WaitlistedPassenger[] 
   // Sequentially resolve baseline (single-seat) bookings against the pool —
   // these represent passengers already confirmed through normal booking.
   // Whoever fails becomes the genuine waitlist.
-  const waitlist = [];
+  const waitlist: WaitlistedPassenger[] = [];
   let wlId = 1;
   candidates.forEach((c) => {
     const res = coverJourney(seats, c.from, c.to, 1);
@@ -272,8 +272,10 @@ function buildWaitlist(rng: () => number, seats: Seat[]): WaitlistedPassenger[] 
       // actually get booked, then record them as genuinely waitlisted.
       res.used.forEach((seg) => {
         const seat = seats.find((s) => s.uid === seg.uid);
-        seat.free.push({ start: seg.from, end: seg.to });
-        mergeAdjacent(seat);
+        if (seat) {
+          seat.free.push({ start: seg.from, end: seg.to });
+          mergeAdjacent(seat);
+        }
       });
       waitlist.push({ id: `WL${String(wlId).padStart(3, "0")}`, from: c.from, to: c.to });
       wlId++;
@@ -295,7 +297,7 @@ function initialState() {
 ---------------------------------------------------------------------- */
 function simulate(baselineSeats: Seat[], waitlist: WaitlistedPassenger[], k: number, generalOn: boolean): SimulationOutput {
   const pool = cloneSeats(baselineSeats);
-  const results = [];
+  const results: any[] = [];
 
   waitlist.forEach((p: WaitlistedPassenger) => {
     if (k === 0 && generalOn) {
@@ -321,11 +323,13 @@ function simulate(baselineSeats: Seat[], waitlist: WaitlistedPassenger[], k: num
       // non-general passenger still represents real seats they'd hold if
       // we let them — since they refuse general and aren't confirmed, give
       // those fragments back to the pool.
-      res.used.forEach((seg) => {
+      res.used.forEach((seg: any) => {
         const seat = pool.find((s) => s.uid === seg.uid);
-        seat.free.push({ start: seg.from, end: seg.to });
-        seat.free.sort((a, b) => a.start - b.start);
-        mergeAdjacent(seat);
+        if (seat) {
+          seat.free.push({ start: seg.from, end: seg.to });
+          seat.free.sort((a, b) => a.start - b.start);
+          mergeAdjacent(seat);
+        }
       });
       results.push({ id: p.id, from: p.from, to: p.to, status: "waitlisted", used: [] });
     }
@@ -336,14 +340,14 @@ function simulate(baselineSeats: Seat[], waitlist: WaitlistedPassenger[], k: num
   const genFull = results.filter((r) => r.status === "general-full");
   const stillWL = results.filter((r) => r.status === "waitlisted");
 
-  const hoursOf = (idx) => STATIONS[idx].hour;
+  const hoursOf = (idx: number) => STATIONS[idx].hour;
   let newlyFilledHours = 0;
   confirmed.forEach((r) => (newlyFilledHours += hoursOf(r.to) - hoursOf(r.from)));
   genPartial.forEach((r) => (newlyFilledHours += hoursOf(r.coveredTo) - hoursOf(r.from)));
 
   let revenue = 0;
   [...confirmed, ...genPartial].forEach((r) => {
-    if (r.used.length) revenue += FARE[r.used[0].type];
+    if (r.used.length) revenue += FARE[r.used[0].type as keyof typeof FARE];
   });
 
   const avgGeneralHrs =
@@ -374,8 +378,8 @@ function simulate(baselineSeats: Seat[], waitlist: WaitlistedPassenger[], k: num
 
 function mergeAdjacent(seat: Seat) {
   seat.free.sort((a, b) => a.start - b.start);
-  const merged = [];
-  seat.free.forEach((f) => {
+  const merged: any[] = [];
+  seat.free.forEach((f: any) => {
     if (merged.length && merged[merged.length - 1].end === f.start) {
       merged[merged.length - 1].end = f.end;
     } else {
@@ -397,10 +401,10 @@ const STATUS_META = {
 
 function seatTimeline(seat: Seat | null | undefined) {
   if (!seat) return [];
-  const segs = [];
+  const segs: any[] = [];
   let cursor = 0;
   const free = [...seat.free].sort((a, b) => a.start - b.start);
-  free.forEach((f) => {
+  free.forEach((f: any) => {
     if (f.start > cursor) segs.push({ from: cursor, to: f.start, type: "occupied" });
     segs.push({ from: f.start, to: f.end, type: "free" });
     cursor = f.end;
@@ -501,12 +505,12 @@ export default function SeatBridge() {
   const filteredWL = useMemo(() => {
     let list = allWlRows;
     if (wlSeatCountFilter !== "all") {
-      list = list.filter((r) => wlBucketOf(r) === wlSeatCountFilter);
+      list = list.filter((r: any) => wlBucketOf(r) === wlSeatCountFilter);
     }
     if (!wlFilter.trim()) return list;
     const f = wlFilter.trim().toUpperCase();
     return list.filter(
-      (r) =>
+      (r: any) =>
         r.id.includes(f) ||
         stCode(r.from).includes(f) ||
         stCode(r.to).includes(f) ||
@@ -515,11 +519,11 @@ export default function SeatBridge() {
   }, [allWlRows, wlFilter, wlSeatCountFilter, wlBucketOf]);
 
   const berthRows = useMemo(() => {
-    const rows = [];
+    const rows: any[] = [];
     displaySeats
       .filter((s: Seat) => s.type === coachTab)
       .forEach((s: Seat) => {
-        s.free.forEach((f) => {
+        s.free.forEach((f: any) => {
           rows.push({ uid: s.uid, coach: s.coach, berth: s.berth, from: f.start, to: f.end });
         });
       });
@@ -758,7 +762,7 @@ export default function SeatBridge() {
         </div>
 
         {(() => {
-          const seat = selectedSeatUid ? displaySeats.find((s) => s.uid === selectedSeatUid) : null;
+          const seat = selectedSeatUid ? displaySeats.find((s: any) => s.uid === selectedSeatUid) : null;
           if (!seat) {
             return <div className="sb-inspector empty">Click any seat above to see exactly where it's booked and where it's free.</div>;
           }
@@ -767,7 +771,7 @@ export default function SeatBridge() {
             <div className="sb-inspector">
               <div className="sb-inspector-head">
                 <span className="mono">{seat.uid}</span>
-                <span className="sb-inspector-sub">{TYPE_LABEL[seat.type]} · berth {seat.berth}</span>
+                <span className="sb-inspector-sub">{TYPE_LABEL[seat.type as keyof typeof TYPE_LABEL]} · berth {seat.berth}</span>
                 <button className="sb-chip-close" onClick={() => setSelectedSeatUid(null)}>✕ close</button>
               </div>
               <div className="sb-timeline">
@@ -866,7 +870,7 @@ export default function SeatBridge() {
                 const meta = STATUS_META[r.status as keyof typeof STATUS_META];
                 const Icon = meta.Icon;
                 let detail = "—";
-                if (r.status === "confirmed") detail = `${r.used.length} seat${r.used.length > 1 ? "s" : ""}: ${r.used.map((u) => u.uid).join(" → ")}`;
+                if (r.status === "confirmed") detail = `${r.used.length} seat${r.used.length > 1 ? "s" : ""}: ${r.used.map((u: any) => u.uid).join(" → ")}`;
                 if (r.status === "general-partial") {
                   const genHrs = STATIONS[r.to].hour - STATIONS[r.coveredTo].hour;
                   const pctGen = (genHrs / (STATIONS[r.to].hour - STATIONS[r.from].hour)) * 100;
