@@ -26,10 +26,78 @@ import {
 } from "lucide-react";
 
 /* ----------------------------------------------------------------------
+   TYPES
+---------------------------------------------------------------------- */
+interface Station {
+  code: string;
+  name: string;
+  hour: number;
+}
+
+interface Coach {
+  code: string;
+  type: "SL" | "3A" | "2A";
+  seats: number;
+}
+
+interface Seat {
+  uid: string;
+  coach: string;
+  type: "SL" | "3A" | "2A";
+  berth: number;
+  free: { start: number; end: number }[];
+}
+
+interface Segment {
+  uid: string;
+  coach: string;
+  type: "SL" | "3A" | "2A";
+  from: number;
+  to: number;
+}
+
+interface WaitlistedPassenger {
+  id: string;
+  from: number;
+  to: number;
+}
+
+interface SimulationResult {
+  id: string;
+  from: number;
+  to: number;
+  status: "confirmed" | "general-partial" | "general-full" | "waitlisted";
+  used: Segment[];
+  coveredTo?: number;
+}
+
+interface SimulationMetrics {
+  total: number;
+  confirmed: number;
+  genPartial: number;
+  genFull: number;
+  stillWL: number;
+  confirmRate: number;
+  coveredRate: number;
+  newlyFilledHours: number;
+  utilizationExtra: number;
+  revenue: number;
+  avgGeneralHrs: number;
+}
+
+interface SimulationOutput {
+  k: number;
+  generalOn: boolean;
+  pool: Seat[];
+  results: SimulationResult[];
+  metrics: SimulationMetrics;
+}
+
+/* ----------------------------------------------------------------------
    SEEDED RNG — deterministic so "Reset" always returns the exact same
    synthetic dataset.
 ---------------------------------------------------------------------- */
-function mulberry32(seed) {
+function mulberry32(seed: number) {
   let a = seed;
   return function () {
     a |= 0;
@@ -80,22 +148,37 @@ const SEED = 88172645;
 /* ----------------------------------------------------------------------
    DATA GENERATION
 ---------------------------------------------------------------------- */
-function buildSeats(rng) {
+function randomFragment(rng: () => number) {
+  const startIdx = Math.floor(rng() * (N - 1));
+  const maxLen = N - 1 - startIdx;
+  const lenRoll = rng();
+  let length;
+  if (lenRoll < 0.12) length = maxLen;
+  else if (lenRoll < 0.4) length = Math.max(1, Math.floor(maxLen * 0.6));
+  else length = Math.max(1, Math.floor(rng() * Math.max(1, maxLen * 0.4)) + 1);
+  length = Math.min(length, maxLen);
+  return { start: startIdx, end: startIdx + length };
+}
+
+function buildSeats(rng: () => number): Seat[] {
   const seats = [];
   COACHES.forEach((coach) => {
     for (let berth = 1; berth <= coach.seats; berth++) {
       const roll = rng();
       let free = [];
       if (roll >= 0.15) {
-        const startIdx = Math.floor(rng() * (N - 1));
-        const maxLen = N - 1 - startIdx;
-        const lenRoll = rng();
-        let length;
-        if (lenRoll < 0.12) length = maxLen;
-        else if (lenRoll < 0.4) length = Math.max(1, Math.floor(maxLen * 0.6));
-        else length = Math.max(1, Math.floor(rng() * Math.max(1, maxLen * 0.4)) + 1);
-        length = Math.min(length, maxLen);
-        free = [{ start: startIdx, end: startIdx + length }];
+        free.push(randomFragment(rng));
+        // ~22% of seats get a second, disjoint pocket of availability —
+        // e.g. someone boards midway then someone else alights before the
+        // end — this is what makes multi-seat coverage possible at all.
+        if (rng() < 0.22) {
+          const second = randomFragment(rng);
+          const overlaps = free.some((f) => second.start < f.end && f.start < second.end);
+          if (!overlaps) {
+            free.push(second);
+            free.sort((a, b) => a.start - b.start);
+          }
+        }
       }
       seats.push({
         uid: `${coach.code}-${String(berth).padStart(2, "0")}`,
@@ -109,14 +192,14 @@ function buildSeats(rng) {
   return seats;
 }
 
-function cloneSeats(seats) {
+function cloneSeats(seats: Seat[]): Seat[] {
   return seats.map((s) => ({ ...s, free: s.free.map((f) => ({ ...f })) }));
 }
 
 // Greedy interval cover: fills [from,to) using at most maxSeats free
 // fragments taken from `pool` (mutated in place — consumed portions are
 // removed / split).
-function coverJourney(pool, from, to, maxSeats) {
+function coverJourney(pool: Seat[], from: number, to: number, maxSeats: number) {
   let current = from;
   const used = [];
   while (current < to && used.length < maxSeats) {
@@ -149,20 +232,30 @@ function coverJourney(pool, from, to, maxSeats) {
   return { success: current >= to, used, coveredTo: current };
 }
 
-function buildWaitlist(rng, seats) {
+function buildWaitlist(rng: () => number, seats: Seat[]): WaitlistedPassenger[] {
+  const HUBS = [5, 6, 7]; // VKN, ONGL, NLR — intermediate demand hubs
   const candidates = [];
   for (let i = 0; i < CANDIDATE_POOL; i++) {
-    const full = rng() < 0.7;
+    const bucket = rng();
     let from, to;
-    if (full) {
-      from = 0;
+    if (bucket < 0.3) {
+      // headed all the way to the final stop, boarding at a variety of
+      // stations (skewed toward the origin — that's where demand peaks —
+      // but not exclusively, so the route column stays varied)
+      from = Math.floor(rng() * rng() * (N - 1));
       to = N - 1;
+    } else if (bucket < 0.6) {
+      // headed to a major intermediate hub, not the terminus
+      to = HUBS[Math.floor(rng() * HUBS.length)];
+      from = Math.floor(rng() * to);
     } else {
+      // any other random sub-journey
       from = Math.floor(rng() * (N - 2));
       const maxLen = N - 1 - from;
       const len = Math.max(1, Math.floor(rng() * maxLen) + 1);
       to = Math.min(N - 1, from + len);
     }
+    if (to <= from) to = Math.min(N - 1, from + 1);
     candidates.push({ from, to });
   }
 
@@ -200,11 +293,11 @@ function initialState() {
 /* ----------------------------------------------------------------------
    SIMULATION
 ---------------------------------------------------------------------- */
-function simulate(baselineSeats, waitlist, k, generalOn) {
+function simulate(baselineSeats: Seat[], waitlist: WaitlistedPassenger[], k: number, generalOn: boolean): SimulationOutput {
   const pool = cloneSeats(baselineSeats);
   const results = [];
 
-  waitlist.forEach((p) => {
+  waitlist.forEach((p: WaitlistedPassenger) => {
     if (k === 0 && generalOn) {
       results.push({ id: p.id, from: p.from, to: p.to, status: "general-full", used: [], coveredHours: 0 });
       return;
@@ -279,7 +372,7 @@ function simulate(baselineSeats, waitlist, k, generalOn) {
   };
 }
 
-function mergeAdjacent(seat) {
+function mergeAdjacent(seat: Seat) {
   seat.free.sort((a, b) => a.start - b.start);
   const merged = [];
   seat.free.forEach((f) => {
@@ -302,13 +395,28 @@ const STATUS_META = {
   waitlisted: { label: "Still Waitlisted", color: "var(--bad)", Icon: CircleOff },
 };
 
-function pct(n) {
+function seatTimeline(seat: Seat | null | undefined) {
+  if (!seat) return [];
+  const segs = [];
+  let cursor = 0;
+  const free = [...seat.free].sort((a, b) => a.start - b.start);
+  free.forEach((f) => {
+    if (f.start > cursor) segs.push({ from: cursor, to: f.start, type: "occupied" });
+    segs.push({ from: f.start, to: f.end, type: "free" });
+    cursor = f.end;
+  });
+  if (cursor < N - 1) segs.push({ from: cursor, to: N - 1, type: "occupied" });
+  if (segs.length === 0) segs.push({ from: 0, to: N - 1, type: "occupied" });
+  return segs;
+}
+
+function pct(n: number) {
   return `${n.toFixed(1)}%`;
 }
-function hrs(n) {
+function hrs(n: number) {
   return `${n.toFixed(1)} hrs`;
 }
-function stCode(idx) {
+function stCode(idx: number) {
   return STATIONS[idx].code;
 }
 
@@ -327,6 +435,8 @@ export default function SeatBridge() {
   const [coachTab, setCoachTab] = useState("SL");
   const [wlFilter, setWlFilter] = useState("");
   const [berthFilter, setBerthFilter] = useState("");
+  const [selectedSeatUid, setSelectedSeatUid] = useState(null);
+  const [wlSeatCountFilter, setWlSeatCountFilter] = useState("all");
 
   const displaySeats = applied ? applied.pool : base.baselineSeats;
 
@@ -362,14 +472,37 @@ export default function SeatBridge() {
     setCompareData(null);
     setWlFilter("");
     setBerthFilter("");
+    setSelectedSeatUid(null);
+    setWlSeatCountFilter("all");
   }, []);
 
   const m = applied?.metrics;
   const dConfirmRate = m && prevMetrics ? m.confirmRate - prevMetrics.confirmRate : null;
   const dCoveredRate = m && prevMetrics ? m.coveredRate - prevMetrics.coveredRate : null;
 
+  const wlBucketOf = useCallback((r: any) => {
+    if (r.status === "confirmed") return `confirmed-${r.used.length}`;
+    if (r.status === "general-partial") return "general-partial";
+    if (r.status === "general-full") return "general-full";
+    return "waitlisted";
+  }, []);
+
+  const allWlRows = applied ? applied.results : base.waitlist.map((p) => ({ ...p, status: "waitlisted", used: [] }));
+
+  const filterCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    allWlRows.forEach((r: any) => {
+      const b = wlBucketOf(r);
+      counts[b] = (counts[b] || 0) + 1;
+    });
+    return counts;
+  }, [allWlRows, wlBucketOf]);
+
   const filteredWL = useMemo(() => {
-    const list = applied ? applied.results : base.waitlist.map((p) => ({ ...p, status: "waitlisted", used: [] }));
+    let list = allWlRows;
+    if (wlSeatCountFilter !== "all") {
+      list = list.filter((r) => wlBucketOf(r) === wlSeatCountFilter);
+    }
     if (!wlFilter.trim()) return list;
     const f = wlFilter.trim().toUpperCase();
     return list.filter(
@@ -377,15 +510,15 @@ export default function SeatBridge() {
         r.id.includes(f) ||
         stCode(r.from).includes(f) ||
         stCode(r.to).includes(f) ||
-        (STATUS_META[r.status]?.label || "").toUpperCase().includes(f)
+        (STATUS_META[r.status as keyof typeof STATUS_META]?.label || "").toUpperCase().includes(f)
     );
-  }, [applied, base, wlFilter]);
+  }, [allWlRows, wlFilter, wlSeatCountFilter, wlBucketOf]);
 
   const berthRows = useMemo(() => {
     const rows = [];
     displaySeats
-      .filter((s) => s.type === coachTab)
-      .forEach((s) => {
+      .filter((s: Seat) => s.type === coachTab)
+      .forEach((s: Seat) => {
         s.free.forEach((f) => {
           rows.push({ uid: s.uid, coach: s.coach, berth: s.berth, from: f.start, to: f.end });
         });
@@ -398,7 +531,7 @@ export default function SeatBridge() {
     );
   }, [displaySeats, coachTab, berthFilter]);
 
-  const heatmapCoaches = COACHES.filter((c) => c.type === coachTab);
+  const heatmapCoaches = COACHES.filter((c: any) => c.type === coachTab);
 
   return (
     <div className="sb-root">
@@ -517,20 +650,20 @@ export default function SeatBridge() {
           <div className="sb-card-title">Confirmation outcome by seat-change tolerance</div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={compareData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+              <BarChart data={compareData as any} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                 <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -2, fill: "var(--muted)", fontSize: 11 }} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" />
                 <Tooltip
                   contentStyle={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--text)" }}
-                  formatter={(v) => `${v}%`}
+                  formatter={(v: any) => `${v}%`}
                 />
                 <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
                 <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" radius={[0, 0, 0, 0]} />
                 <Bar dataKey="Partial + General" stackId="a" fill="var(--warn)" />
                 <Bar dataKey="Full General" stackId="a" fill="var(--warn2)" />
                 <Bar dataKey="Still Waitlisted" stackId="a" fill="var(--bad)">
-                  <LabelList dataKey="revenue" position="top" formatter={(v) => `₹${v.toLocaleString("en-IN")}`} fill="var(--muted)" fontSize={10} />
+                  <LabelList dataKey="revenue" position="top" formatter={(v: any) => `₹${v.toLocaleString("en-IN")}`} fill="var(--muted)" fontSize={10} />
                 </Bar>
               </BarChart>
             </ResponsiveContainer>
@@ -547,8 +680,8 @@ export default function SeatBridge() {
           <div className="sb-card-title">Coach vacancy explorer</div>
           <div className="sb-tabs">
             {["SL", "3A", "2A"].map((t) => (
-              <button key={t} className={`sb-tab ${coachTab === t ? "active" : ""}`} onClick={() => setCoachTab(t)}>
-                {TYPE_LABEL[t]}
+              <button key={t} className={`sb-tab ${coachTab === t ? "active" : ""}`} onClick={() => setCoachTab(t as any)}>
+                {TYPE_LABEL[t as keyof typeof TYPE_LABEL]}
               </button>
             ))}
           </div>
@@ -556,18 +689,27 @@ export default function SeatBridge() {
 
         <div className="sb-heatmap">
           {heatmapCoaches.map((coach) => {
-            const coachSeats = displaySeats.filter((s) => s.coach === coach.code);
+            const coachSeats = displaySeats.filter((s: Seat) => s.coach === coach.code);
             return (
               <div className="sb-coach-block" key={coach.code}>
                 <div className="sb-coach-label">{coach.code}</div>
                 <div className="sb-coach-grid">
-                  {coachSeats.map((s) => {
+                  {coachSeats.map((s: Seat) => {
                     const freeHours = s.free.reduce((sum, f) => sum + (STATIONS[f.end].hour - STATIONS[f.start].hour), 0);
                     const frac = TOTAL_HOURS > 0 ? freeHours / TOTAL_HOURS : 0;
                     let cls = "occupied";
                     if (frac > 0.85) cls = "free";
                     else if (frac > 0) cls = "partial";
-                    return <div key={s.uid} className={`sb-seat ${cls}`} title={`${s.uid} · ${freeHours.toFixed(1)}h free`} />;
+                    return (
+                      <button
+                        key={s.uid}
+                        className={`sb-seat ${cls} ${selectedSeatUid === s.uid ? "selected" : ""}`}
+                        title={`${s.uid} · ${freeHours.toFixed(1)}h free`}
+                        onClick={() => setSelectedSeatUid(s.uid === selectedSeatUid ? null : s.uid)}
+                      >
+                        {s.berth}
+                      </button>
+                    );
                   })}
                 </div>
               </div>
@@ -578,10 +720,39 @@ export default function SeatBridge() {
           <span><i className="sb-dot free" /> mostly free</span>
           <span><i className="sb-dot partial" /> fragment free</span>
           <span><i className="sb-dot occupied" /> occupied</span>
+          <span className="sb-legend-hint">click any seat to inspect its booking timeline</span>
         </div>
 
+        {(() => {
+          const seat = selectedSeatUid ? displaySeats.find((s) => s.uid === selectedSeatUid) : null;
+          if (!seat) {
+            return <div className="sb-inspector empty">Click any seat above to see exactly where it's booked and where it's free.</div>;
+          }
+          const timeline = seatTimeline(seat);
+          return (
+            <div className="sb-inspector">
+              <div className="sb-inspector-head">
+                <span className="mono">{seat.uid}</span>
+                <span className="sb-inspector-sub">{TYPE_LABEL[seat.type]} · berth {seat.berth}</span>
+                <button className="sb-chip-close" onClick={() => setSelectedSeatUid(null)}>✕ close</button>
+              </div>
+              <div className="sb-timeline">
+                {timeline.map((seg: any, i: number) => (
+                  <div key={i} className={`sb-timeline-seg ${seg.type}`} title={`${stCode(seg.from)} → ${stCode(seg.to)}`}>
+                    {stCode(seg.from)} → {stCode(seg.to)}
+                  </div>
+                ))}
+              </div>
+              <div className="sb-inspector-legend">
+                <span><i className="sb-dot occupied" /> already booked (from normal booking)</span>
+                <span><i className="sb-dot free" /> free — available to cover a waitlisted passenger's segment</span>
+              </div>
+            </div>
+          );
+        })()}
+
         <div className="sb-card-title-row" style={{ marginTop: 22 }}>
-          <div className="sb-card-title small">Vacant berth details — {TYPE_LABEL[coachTab]}</div>
+          <div className="sb-card-title small">Vacant berth details — {TYPE_LABEL[coachTab as keyof typeof TYPE_LABEL]}</div>
           <div className="sb-search">
             <Search size={14} />
             <input placeholder="search coach, berth, station…" value={berthFilter} onChange={(e) => setBerthFilter(e.target.value)} />
@@ -623,6 +794,29 @@ export default function SeatBridge() {
             <input placeholder="search id, station, status…" value={wlFilter} onChange={(e) => setWlFilter(e.target.value)} />
           </div>
         </div>
+        <div className="sb-wl-filters">
+          {[
+            { key: "all", label: "All" },
+            { key: "confirmed-1", label: "1 seat" },
+            { key: "confirmed-2", label: "2 seats" },
+            { key: "confirmed-3", label: "3 seats" },
+            { key: "confirmed-4", label: "4 seats" },
+            { key: "confirmed-5", label: "5 seats" },
+            { key: "confirmed-6", label: "6 seats" },
+            { key: "general-partial", label: "Partial + General" },
+            { key: "general-full", label: "Full General" },
+            { key: "waitlisted", label: "Still waitlisted" },
+          ].map((f) => (
+            <button
+              key={f.key}
+              className={`sb-chip ${wlSeatCountFilter === f.key ? "active" : ""}`}
+              onClick={() => setWlSeatCountFilter(f.key)}
+              disabled={f.key !== "all" && !filterCounts[f.key]}
+            >
+              {f.label} <span className="sb-chip-count">{f.key === "all" ? allWlRows.length : filterCounts[f.key] || 0}</span>
+            </button>
+          ))}
+        </div>
         <div className="sb-table-wrap tall">
           <table className="sb-table">
             <thead>
@@ -634,8 +828,8 @@ export default function SeatBridge() {
               </tr>
             </thead>
             <tbody>
-              {filteredWL.map((r) => {
-                const meta = STATUS_META[r.status];
+              {filteredWL.map((r: any) => {
+                const meta = STATUS_META[r.status as keyof typeof STATUS_META];
                 const Icon = meta.Icon;
                 let detail = "—";
                 if (r.status === "confirmed") detail = `${r.used.length} seat${r.used.length > 1 ? "s" : ""}: ${r.used.map((u) => u.uid).join(" → ")}`;
@@ -674,7 +868,13 @@ export default function SeatBridge() {
 /* ----------------------------------------------------------------------
    SMALL PRESENTATIONAL PIECES
 ---------------------------------------------------------------------- */
-function BoardField({ label, value, flip }) {
+
+interface BoardFieldProps {
+  label: string;
+  value: string;
+  flip?: boolean;
+}
+function BoardField({ label, value, flip = false }: BoardFieldProps) {
   return (
     <div className="sb-board-field">
       <div className="sb-board-label">{label}</div>
@@ -683,7 +883,15 @@ function BoardField({ label, value, flip }) {
   );
 }
 
-function MetricCard({ icon, label, value, sub, delta }) {
+
+interface MetricCardProps {
+  icon: React.ReactNode;
+  label: string;
+  value: string | number;
+  sub: string;
+  delta?: number | null;
+}
+function MetricCard({ icon, label, value, sub, delta = null }: MetricCardProps) {
   return (
     <div className="sb-metric">
       <div className="sb-metric-icon">{icon}</div>
@@ -812,20 +1020,50 @@ const CSS = `
 .sb-tab { background: var(--panel2); border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 20px; font-size: 12.5px; cursor: pointer; }
 .sb-tab.active { background: var(--accent2); border-color: var(--accent2); color: #06101f; font-weight: 700; }
 
-.sb-heatmap { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
-.sb-coach-block { display: flex; align-items: center; gap: 12px; }
-.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
+.sb-heatmap { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
+.sb-coach-block { display: flex; align-items: flex-start; gap: 12px; }
+.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--muted); flex-shrink: 0; padding-top: 4px; }
 .sb-coach-grid { display: flex; flex-wrap: wrap; gap: 3px; }
-.sb-seat { width: 10px; height: 10px; border-radius: 2px; }
+.sb-seat {
+  width: 22px; height: 22px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; font-weight: 600; color: rgba(6,16,31,0.65);
+  cursor: pointer; padding: 0; transition: transform .1s ease, outline .1s ease;
+}
+.sb-seat:hover { transform: scale(1.15); }
+.sb-seat.selected { outline: 2px solid var(--accent2); outline-offset: 1px; }
 .sb-seat.free { background: var(--ok); }
 .sb-seat.partial { background: var(--warn); }
-.sb-seat.occupied { background: #2a3450; }
+.sb-seat.occupied { background: #2a3450; color: var(--muted); }
 
-.sb-legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--muted); }
+.sb-legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; align-items: center; }
+.sb-legend-hint { font-style: italic; opacity: .8; }
 .sb-dot { display: inline-block; width: 9px; height: 9px; border-radius: 2px; margin-right: 6px; }
 .sb-dot.free { background: var(--ok); }
 .sb-dot.partial { background: var(--warn); }
 .sb-dot.occupied { background: #2a3450; }
+
+.sb-inspector { background: var(--panel2); border: 1px solid var(--line); border-radius: 10px; padding: 14px 16px; margin-top: 14px; }
+.sb-inspector.empty { color: var(--muted); font-size: 13px; text-align: center; padding: 18px; }
+.sb-inspector-head { display: flex; align-items: center; gap: 12px; margin-bottom: 10px; font-size: 13.5px; font-weight: 700; }
+.sb-inspector-sub { color: var(--muted); font-weight: 500; font-size: 12.5px; }
+.sb-chip-close { margin-left: auto; background: transparent; border: none; color: var(--muted); cursor: pointer; font-size: 12px; }
+.sb-chip-close:hover { color: var(--text); }
+.sb-timeline { display: flex; flex-wrap: wrap; gap: 6px; margin-bottom: 10px; }
+.sb-timeline-seg { padding: 6px 10px; border-radius: 6px; font-family: 'IBM Plex Mono', monospace; font-size: 12px; font-weight: 600; }
+.sb-timeline-seg.free { background: rgba(52,211,153,0.15); color: var(--ok); border: 1px solid rgba(52,211,153,0.35); }
+.sb-timeline-seg.occupied { background: rgba(139,150,179,0.1); color: var(--muted); border: 1px solid var(--line); }
+.sb-inspector-legend { display: flex; gap: 18px; font-size: 11.5px; color: var(--muted); flex-wrap: wrap; }
+
+.sb-wl-filters { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 12px; margin-bottom: 4px; }
+.sb-chip {
+  background: var(--panel2); border: 1px solid var(--line); color: var(--muted);
+  padding: 5px 10px; border-radius: 20px; font-size: 11.5px; cursor: pointer; display: flex; align-items: center; gap: 5px;
+}
+.sb-chip:disabled { opacity: .35; cursor: not-allowed; }
+.sb-chip.active { background: var(--accent2); border-color: var(--accent2); color: #06101f; font-weight: 700; }
+.sb-chip-count { font-family: 'IBM Plex Mono', monospace; opacity: .8; }
+.sb-chip.active .sb-chip-count { opacity: 1; }
 
 .sb-search { display: flex; align-items: center; gap: 6px; background: var(--panel2); border: 1px solid var(--line); border-radius: 8px; padding: 6px 10px; color: var(--muted); }
 .sb-search input { background: transparent; border: none; outline: none; color: var(--text); font-size: 12.5px; width: 190px; }
