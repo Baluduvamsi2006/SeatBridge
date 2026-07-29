@@ -478,6 +478,36 @@ export default function SeatBridge() {
           <b>{base.waitlist.length}</b> genuinely waitlisted passengers this train could additionally confirm.
         </div>
       )}
+
+      {/* ---------- COMPARE CHART ---------- */}
+      {compareData && (
+        <section className="sb-card">
+          <div className="sb-card-title">Confirmation outcome by seat-change tolerance</div>
+          <div style={{ width: "100%", height: 320 }}>
+            <ResponsiveContainer>
+              <BarChart data={compareData} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+                <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
+                <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -2, fill: "var(--muted)", fontSize: 11 }} />
+                <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" />
+                <Tooltip
+                  contentStyle={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--text)" }}
+                  formatter={(v) => `${v}%`}
+                />
+                <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
+                <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Partial + General" stackId="a" fill="var(--warn)" />
+                <Bar dataKey="Full General" stackId="a" fill="var(--warn2)" />
+                <Bar dataKey="Still Waitlisted" stackId="a" fill="var(--bad)">
+                  <LabelList dataKey="revenue" position="top" formatter={(v) => `₹${v.toLocaleString("en-IN")}`} fill="var(--muted)" fontSize={10} />
+                </Bar>
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+          <div className="sb-card-note">
+            Top label on each bar shows estimated extra ticket revenue at that tolerance (reserved-class fares only, general excluded).
+          </div>
+        </section>
+      )}
     </div>
   );
 }
