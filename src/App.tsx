@@ -319,6 +319,55 @@ export default function SeatBridge() {
   const [gen, setGen] = useState(0); // bump to force full dataset regeneration
   const base = useMemo(() => initialState(), [gen]);
 
+  const [k, setK] = useState(0);
+  const [generalOn, setGeneralOn] = useState(false);
+  const [applied, setApplied] = useState(null); // simulate() result
+  const [prevMetrics, setPrevMetrics] = useState(null);
+  const [compareData, setCompareData] = useState(null);
+  const [coachTab, setCoachTab] = useState("SL");
+  const [wlFilter, setWlFilter] = useState("");
+  const [berthFilter, setBerthFilter] = useState("");
+
+  const displaySeats = applied ? applied.pool : base.baselineSeats;
+
+  const applySimulation = useCallback(() => {
+    setPrevMetrics(applied ? applied.metrics : { confirmRate: 0, coveredRate: 0, utilizationExtra: 0, revenue: 0 });
+    const result = simulate(base.baselineSeats, base.waitlist, k, generalOn);
+    setApplied(result);
+    setCompareData(null);
+  }, [applied, base, k, generalOn]);
+
+  const handleCompare = useCallback(() => {
+    const rows = K_OPTIONS.map((kk) => {
+      const withGen = simulate(base.baselineSeats, base.waitlist, kk, true);
+      const noGen = simulate(base.baselineSeats, base.waitlist, kk, false);
+      return {
+        k: kk === 0 ? "0 (current)" : String(kk),
+        Confirmed: Number(noGen.metrics.confirmRate.toFixed(1)),
+        "Partial + General": Number((withGen.metrics.genPartial / base.waitlist.length * 100).toFixed(1)),
+        "Full General": Number((withGen.metrics.genFull / base.waitlist.length * 100).toFixed(1)),
+        "Still Waitlisted": Number((withGen.metrics.stillWL / base.waitlist.length * 100).toFixed(1)),
+        revenue: noGen.metrics.revenue,
+      };
+    });
+    setCompareData(rows);
+  }, [base]);
+
+  const handleReset = useCallback(() => {
+    setGen((g) => g + 1);
+    setK(0);
+    setGeneralOn(false);
+    setApplied(null);
+    setPrevMetrics(null);
+    setCompareData(null);
+    setWlFilter("");
+    setBerthFilter("");
+  }, []);
+
+  const m = applied?.metrics;
+  const dConfirmRate = m && prevMetrics ? m.confirmRate - prevMetrics.confirmRate : null;
+  const dCoveredRate = m && prevMetrics ? m.coveredRate - prevMetrics.coveredRate : null;
+
   return (
     <div className="sb-root">
       <style>{CSS}</style>
@@ -340,6 +389,95 @@ export default function SeatBridge() {
           <BoardField label="Waitlist" value={String(base.waitlist.length)} flip />
         </div>
       </header>
+
+      {/* ---------- CONTROL PANEL ---------- */}
+      <section className="sb-panel">
+        <div className="sb-panel-row">
+          <div className="sb-control-block">
+            <div className="sb-control-label">
+              <ArrowRightLeft size={15} /> Seat-change tolerance (max switches per passenger)
+            </div>
+            <div className="sb-k-group">
+              {K_OPTIONS.map((opt) => (
+                <button
+                  key={opt}
+                  className={`sb-k-btn ${k === opt ? "active" : ""}`}
+                  onClick={() => setK(opt)}
+                >
+                  {opt === 0 ? "0 · none" : opt}
+                </button>
+              ))}
+            </div>
+          </div>
+
+          <label className="sb-check">
+            <input type="checkbox" checked={generalOn} onChange={(e) => setGeneralOn(e.target.checked)} />
+            <span>Fall back to General class for any uncovered portion</span>
+          </label>
+        </div>
+
+        <div className="sb-panel-actions">
+          <button className="sb-btn primary" onClick={applySimulation}>
+            <Gauge size={16} /> Apply simulation
+          </button>
+          <button className="sb-btn" onClick={handleCompare}>
+            <BarChart3 size={16} /> Compare 0–5
+          </button>
+          <button className="sb-btn ghost" onClick={handleReset}>
+            <RotateCcw size={16} /> Reset to start
+          </button>
+        </div>
+      </section>
+
+      {/* ---------- METRICS ---------- */}
+      {applied && (
+        <section className="sb-metrics">
+          <MetricCard
+            icon={<Users size={16} />}
+            label="Waitlist before"
+            value={m.total}
+            sub={`${m.stillWL} still unresolved`}
+          />
+          <MetricCard
+            icon={<CircleCheck size={16} />}
+            label="Confirmed via seat-change"
+            value={m.confirmed}
+            sub={pct(m.confirmRate)}
+            delta={dConfirmRate}
+          />
+          <MetricCard
+            icon={<Ticket size={16} />}
+            label="Covered overall (+General)"
+            value={m.confirmed + m.genPartial + m.genFull}
+            sub={pct(m.coveredRate)}
+            delta={dCoveredRate}
+          />
+          <MetricCard
+            icon={<Gauge size={16} />}
+            label="Extra seat-hours utilised"
+            value={hrs(m.newlyFilledHours)}
+            sub={`${pct(m.utilizationExtra)} of train capacity`}
+          />
+          <MetricCard
+            icon={<IndianRupee size={16} />}
+            label="Est. extra revenue"
+            value={`₹${m.revenue.toLocaleString("en-IN")}`}
+            sub="illustrative fare estimate"
+          />
+          <MetricCard
+            icon={<CircleDot size={16} />}
+            label="General fallback used"
+            value={m.genPartial + m.genFull}
+            sub={m.genPartial ? `avg ${hrs(m.avgGeneralHrs)} in general` : "—"}
+          />
+        </section>
+      )}
+      {!applied && (
+        <div className="sb-hint">
+          Pick a seat-change tolerance above and hit <b>Apply simulation</b> to see how many of the{" "}
+          <b>{base.waitlist.length}</b> genuinely waitlisted passengers this train could additionally confirm.
+        </div>
+      )}
     </div>
   );
 }
