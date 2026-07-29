@@ -77,10 +77,143 @@ const K_OPTIONS = [0, 1, 2, 3, 4, 5];
 const CANDIDATE_POOL = 260;
 const SEED = 88172645;
 
+/* ----------------------------------------------------------------------
+   DATA GENERATION
+---------------------------------------------------------------------- */
+function buildSeats(rng) {
+  const seats = [];
+  COACHES.forEach((coach) => {
+    for (let berth = 1; berth <= coach.seats; berth++) {
+      const roll = rng();
+      let free = [];
+      if (roll >= 0.15) {
+        const startIdx = Math.floor(rng() * (N - 1));
+        const maxLen = N - 1 - startIdx;
+        const lenRoll = rng();
+        let length;
+        if (lenRoll < 0.12) length = maxLen;
+        else if (lenRoll < 0.4) length = Math.max(1, Math.floor(maxLen * 0.6));
+        else length = Math.max(1, Math.floor(rng() * Math.max(1, maxLen * 0.4)) + 1);
+        length = Math.min(length, maxLen);
+        free = [{ start: startIdx, end: startIdx + length }];
+      }
+      seats.push({
+        uid: `${coach.code}-${String(berth).padStart(2, "0")}`,
+        coach: coach.code,
+        type: coach.type,
+        berth,
+        free,
+      });
+    }
+  });
+  return seats;
+}
+
+function cloneSeats(seats) {
+  return seats.map((s) => ({ ...s, free: s.free.map((f) => ({ ...f })) }));
+}
+
+// Greedy interval cover: fills [from,to) using at most maxSeats free
+// fragments taken from `pool` (mutated in place — consumed portions are
+// removed / split).
+function coverJourney(pool, from, to, maxSeats) {
+  let current = from;
+  const used = [];
+  while (current < to && used.length < maxSeats) {
+    let bestSeat = null;
+    let bestFrag = null;
+    let bestFragIdx = -1;
+    pool.forEach((seat) => {
+      seat.free.forEach((frag, idx) => {
+        if (frag.start <= current && frag.end > current) {
+          if (!bestFrag || frag.end > bestFrag.end) {
+            bestSeat = seat;
+            bestFrag = frag;
+            bestFragIdx = idx;
+          }
+        }
+      });
+    });
+    if (!bestSeat) break;
+    const segEnd = Math.min(bestFrag.end, to);
+    used.push({ uid: bestSeat.uid, coach: bestSeat.coach, type: bestSeat.type, from: current, to: segEnd });
+
+    // consume this piece from the seat's free fragment, splitting as needed
+    const leftovers = [];
+    if (bestFrag.start < current) leftovers.push({ start: bestFrag.start, end: current });
+    if (segEnd < bestFrag.end) leftovers.push({ start: segEnd, end: bestFrag.end });
+    bestSeat.free.splice(bestFragIdx, 1, ...leftovers);
+
+    current = segEnd;
+  }
+  return { success: current >= to, used, coveredTo: current };
+}
+
+function buildWaitlist(rng, seats) {
+  const candidates = [];
+  for (let i = 0; i < CANDIDATE_POOL; i++) {
+    const full = rng() < 0.7;
+    let from, to;
+    if (full) {
+      from = 0;
+      to = N - 1;
+    } else {
+      from = Math.floor(rng() * (N - 2));
+      const maxLen = N - 1 - from;
+      const len = Math.max(1, Math.floor(rng() * maxLen) + 1);
+      to = Math.min(N - 1, from + len);
+    }
+    candidates.push({ from, to });
+  }
+
+  // Sequentially resolve baseline (single-seat) bookings against the pool —
+  // these represent passengers already confirmed through normal booking.
+  // Whoever fails becomes the genuine waitlist.
+  const waitlist = [];
+  let wlId = 1;
+  candidates.forEach((c) => {
+    const res = coverJourney(seats, c.from, c.to, 1);
+    if (!res.success) {
+      // a single-seat fit that only covers part of the journey still
+      // consumes a fragment — give it back since this candidate did not
+      // actually get booked, then record them as genuinely waitlisted.
+      res.used.forEach((seg) => {
+        const seat = seats.find((s) => s.uid === seg.uid);
+        seat.free.push({ start: seg.from, end: seg.to });
+        mergeAdjacent(seat);
+      });
+      waitlist.push({ id: `WL${String(wlId).padStart(3, "0")}`, from: c.from, to: c.to });
+      wlId++;
+    }
+  });
+  return waitlist;
+}
+
+function initialState() {
+  const rng = mulberry32(SEED);
+  const rawSeats = buildSeats(rng);
+  const seatsAfterBaseline = cloneSeats(rawSeats);
+  const waitlist = buildWaitlist(rng, seatsAfterBaseline);
+  return { baselineSeats: seatsAfterBaseline, waitlist };
+}
+
+function mergeAdjacent(seat) {
+  seat.free.sort((a, b) => a.start - b.start);
+  const merged = [];
+  seat.free.forEach((f) => {
+    if (merged.length && merged[merged.length - 1].end === f.start) {
+      merged[merged.length - 1].end = f.end;
+    } else {
+      merged.push(f);
+    }
+  });
+  seat.free = merged;
+}
+
 export default function SeatBridge() {
   return (
     <div className="sb-root">
-      <h1>SeatBridge constants and RNG</h1>
+      <h1>SeatBridge booking logic</h1>
     </div>
   );
 }
