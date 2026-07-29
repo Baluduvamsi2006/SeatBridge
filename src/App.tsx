@@ -429,13 +429,13 @@ export default function SeatBridge() {
 
   const [k, setK] = useState(0);
   const [generalOn, setGeneralOn] = useState(false);
-  const [applied, setApplied] = useState(null); // simulate() result
-  const [prevMetrics, setPrevMetrics] = useState(null);
-  const [compareData, setCompareData] = useState(null);
+  const [applied, setApplied] = useState<any>(null); // simulate() result
+  const [prevMetrics, setPrevMetrics] = useState<any>(null);
+  const [compareData, setCompareData] = useState<any>(null);
   const [coachTab, setCoachTab] = useState("SL");
   const [wlFilter, setWlFilter] = useState("");
   const [berthFilter, setBerthFilter] = useState("");
-  const [selectedSeatUid, setSelectedSeatUid] = useState(null);
+  const [selectedSeatUid, setSelectedSeatUid] = useState<any>(null);
   const [wlSeatCountFilter, setWlSeatCountFilter] = useState("all");
 
   const displaySeats = applied ? applied.pool : base.baselineSeats;
@@ -448,20 +448,20 @@ export default function SeatBridge() {
   }, [applied, base, k, generalOn]);
 
   const handleCompare = useCallback(() => {
+    const total = base.waitlist.length;
     const rows = K_OPTIONS.map((kk) => {
-      const withGen = simulate(base.baselineSeats, base.waitlist, kk, true);
-      const noGen = simulate(base.baselineSeats, base.waitlist, kk, false);
+      const res = simulate(base.baselineSeats, base.waitlist, kk, generalOn);
       return {
         k: kk === 0 ? "0 (current)" : String(kk),
-        Confirmed: Number(noGen.metrics.confirmRate.toFixed(1)),
-        "Partial + General": Number((withGen.metrics.genPartial / base.waitlist.length * 100).toFixed(1)),
-        "Full General": Number((withGen.metrics.genFull / base.waitlist.length * 100).toFixed(1)),
-        "Still Waitlisted": Number((withGen.metrics.stillWL / base.waitlist.length * 100).toFixed(1)),
-        revenue: noGen.metrics.revenue,
+        Confirmed: Number(((res.metrics.confirmed / total) * 100).toFixed(1)),
+        "Partial + General": Number(((res.metrics.genPartial / total) * 100).toFixed(1)),
+        "Full General": Number(((res.metrics.genFull / total) * 100).toFixed(1)),
+        "Still Waitlisted": Number(((res.metrics.stillWL / total) * 100).toFixed(1)),
+        revenue: res.metrics.revenue,
       };
     });
-    setCompareData(rows);
-  }, [base]);
+    setCompareData({ rows, generalOn });
+  }, [base, generalOn]);
 
   const handleReset = useCallback(() => {
     setGen((g) => g + 1);
@@ -556,110 +556,127 @@ export default function SeatBridge() {
       </header>
 
       {/* ---------- CONTROL PANEL ---------- */}
-      <section className="sb-panel">
-        <div className="sb-panel-row">
-          <div className="sb-control-block">
-            <div className="sb-control-label">
-              <ArrowRightLeft size={15} /> Seat-change tolerance (max switches per passenger)
+      {(() => {
+        const controlPanel = (
+          <section className="sb-panel">
+            <div className="sb-panel-row">
+              <div className="sb-control-block">
+                <div className="sb-control-label">
+                  <ArrowRightLeft size={15} /> Seat-change tolerance (max switches per passenger)
+                </div>
+                <div className="sb-k-group">
+                  {K_OPTIONS.map((opt) => (
+                    <button
+                      key={opt}
+                      className={`sb-k-btn ${k === opt ? "active" : ""}`}
+                      onClick={() => setK(opt)}
+                    >
+                      {opt === 0 ? "0 · none" : opt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+
+              <label className="sb-check">
+                <input type="checkbox" checked={generalOn} onChange={(e) => setGeneralOn(e.target.checked)} />
+                <span>Fall back to General class for any uncovered portion</span>
+              </label>
             </div>
-            <div className="sb-k-group">
-              {K_OPTIONS.map((opt) => (
-                <button
-                  key={opt}
-                  className={`sb-k-btn ${k === opt ? "active" : ""}`}
-                  onClick={() => setK(opt)}
-                >
-                  {opt === 0 ? "0 · none" : opt}
-                </button>
-              ))}
+
+            <div className="sb-panel-actions">
+              <button className="sb-btn primary" onClick={applySimulation}>
+                <Gauge size={16} /> Apply simulation
+              </button>
+              <button className="sb-btn" onClick={handleCompare}>
+                <BarChart3 size={16} /> Compare 0–5
+              </button>
+              <button className="sb-btn ghost" onClick={handleReset}>
+                <RotateCcw size={16} /> Reset to start
+              </button>
             </div>
-          </div>
+          </section>
+        );
 
-          <label className="sb-check">
-            <input type="checkbox" checked={generalOn} onChange={(e) => setGeneralOn(e.target.checked)} />
-            <span>Fall back to General class for any uncovered portion</span>
-          </label>
-        </div>
+        const statsBlock = (
+          <>
+            {applied && (
+              <section className="sb-metrics">
+                <MetricCard
+                  icon={<Users size={16} />}
+                  label="Waitlist before"
+                  value={m.total}
+                  sub={`${m.stillWL} still unresolved`}
+                />
+                <MetricCard
+                  icon={<CircleCheck size={16} />}
+                  label="Confirmed via seat-change"
+                  value={m.confirmed}
+                  sub={pct(m.confirmRate)}
+                  delta={dConfirmRate}
+                />
+                <MetricCard
+                  icon={<Ticket size={16} />}
+                  label="Covered overall (+General)"
+                  value={m.confirmed + m.genPartial + m.genFull}
+                  sub={pct(m.coveredRate)}
+                  delta={dCoveredRate}
+                />
+                <MetricCard
+                  icon={<Gauge size={16} />}
+                  label="Extra seat-hours utilised"
+                  value={hrs(m.newlyFilledHours)}
+                  sub={`${pct(m.utilizationExtra)} of train capacity`}
+                />
+                <MetricCard
+                  icon={<IndianRupee size={16} />}
+                  label="Est. extra revenue"
+                  value={`₹${m.revenue.toLocaleString("en-IN")}`}
+                  sub="illustrative fare estimate"
+                />
+                <MetricCard
+                  icon={<CircleDot size={16} />}
+                  label="General fallback used"
+                  value={m.genPartial + m.genFull}
+                  sub={m.genPartial ? `avg ${hrs(m.avgGeneralHrs)} in general` : "—"}
+                />
+              </section>
+            )}
+            {!applied && (
+              <div className="sb-hint">
+                Pick a seat-change tolerance below and hit <b>Apply simulation</b> to see how many of the{" "}
+                <b>{base.waitlist.length}</b> genuinely waitlisted passengers this train could additionally confirm.
+              </div>
+            )}
+          </>
+        );
 
-        <div className="sb-panel-actions">
-          <button className="sb-btn primary" onClick={applySimulation}>
-            <Gauge size={16} /> Apply simulation
-          </button>
-          <button className="sb-btn" onClick={handleCompare}>
-            <BarChart3 size={16} /> Compare 0–5
-          </button>
-          <button className="sb-btn ghost" onClick={handleReset}>
-            <RotateCcw size={16} /> Reset to start
-          </button>
-        </div>
-      </section>
-
-      {/* ---------- METRICS ---------- */}
-      {applied && (
-        <section className="sb-metrics">
-          <MetricCard
-            icon={<Users size={16} />}
-            label="Waitlist before"
-            value={m.total}
-            sub={`${m.stillWL} still unresolved`}
-          />
-          <MetricCard
-            icon={<CircleCheck size={16} />}
-            label="Confirmed via seat-change"
-            value={m.confirmed}
-            sub={pct(m.confirmRate)}
-            delta={dConfirmRate}
-          />
-          <MetricCard
-            icon={<Ticket size={16} />}
-            label="Covered overall (+General)"
-            value={m.confirmed + m.genPartial + m.genFull}
-            sub={pct(m.coveredRate)}
-            delta={dCoveredRate}
-          />
-          <MetricCard
-            icon={<Gauge size={16} />}
-            label="Extra seat-hours utilised"
-            value={hrs(m.newlyFilledHours)}
-            sub={`${pct(m.utilizationExtra)} of train capacity`}
-          />
-          <MetricCard
-            icon={<IndianRupee size={16} />}
-            label="Est. extra revenue"
-            value={`₹${m.revenue.toLocaleString("en-IN")}`}
-            sub="illustrative fare estimate"
-          />
-          <MetricCard
-            icon={<CircleDot size={16} />}
-            label="General fallback used"
-            value={m.genPartial + m.genFull}
-            sub={m.genPartial ? `avg ${hrs(m.avgGeneralHrs)} in general` : "—"}
-          />
-        </section>
-      )}
-      {!applied && (
-        <div className="sb-hint">
-          Pick a seat-change tolerance above and hit <b>Apply simulation</b> to see how many of the{" "}
-          <b>{base.waitlist.length}</b> genuinely waitlisted passengers this train could additionally confirm.
-        </div>
-      )}
+        return (
+          <>
+            {statsBlock}
+            {controlPanel}
+          </>
+        );
+      })()}
 
       {/* ---------- COMPARE CHART ---------- */}
       {compareData && (
         <section className="sb-card">
-          <div className="sb-card-title">Confirmation outcome by seat-change tolerance</div>
+          <div className="sb-card-title">
+            Confirmation outcome by seat-change tolerance
+            <span className="sb-scenario-tag">General fallback: {compareData.generalOn ? "ON" : "OFF"}</span>
+          </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={compareData as any} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+              <BarChart data={compareData.rows as any} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                 <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -2, fill: "var(--muted)", fontSize: 11 }} />
-                <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" />
+                <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" domain={[0, 100]} />
                 <Tooltip
                   contentStyle={{ background: "var(--panel2)", border: "1px solid var(--line)", borderRadius: 8, color: "var(--text)" }}
                   formatter={(v: any) => `${v}%`}
                 />
                 <Legend wrapperStyle={{ fontSize: 12, color: "var(--muted)" }} />
-                <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" radius={[0, 0, 0, 0]} />
+                <Bar dataKey="Confirmed" stackId="a" fill="var(--ok)" />
                 <Bar dataKey="Partial + General" stackId="a" fill="var(--warn)" />
                 <Bar dataKey="Full General" stackId="a" fill="var(--warn2)" />
                 <Bar dataKey="Still Waitlisted" stackId="a" fill="var(--bad)">
@@ -669,7 +686,22 @@ export default function SeatBridge() {
             </ResponsiveContainer>
           </div>
           <div className="sb-card-note">
-            Top label on each bar shows estimated extra ticket revenue at that tolerance (reserved-class fares only, general excluded).
+            Each bar sums to 100% of the {base.waitlist.length} waitlisted passengers at that tolerance.{" "}
+            {compareData.generalOn ? (
+              <>
+                General fallback is <b>ON</b>, so nobody stays fully stuck: <b>Partial + General</b> = got some
+                reserved seats then finished the trip in General; <b>Full General</b> = tolerance couldn't cover any
+                part of their journey, so they ride General the whole way. Untick the checkbox above and hit Compare
+                again to see the no-General picture, where "Still Waitlisted" is the one that matters.
+              </>
+            ) : (
+              <>
+                General fallback is <b>OFF</b>, so this is just Confirmed vs. Still Waitlisted — at tolerance 0
+                that's today's system, 100% waitlisted. Tick the General checkbox above and hit Compare again to see
+                how a General fallback changes this.
+              </>
+            )}
+            {" "}Top label = estimated extra reserved-class ticket revenue at that tolerance.
           </div>
         </section>
       )}
@@ -1011,30 +1043,27 @@ const CSS = `
 .sb-delta.down { color: var(--bad); }
 
 .sb-card { background: var(--panel); border: 1px solid var(--line); border-radius: 12px; padding: 20px 22px; margin-bottom: 18px; }
-.sb-card-title { font-size: 15.5px; font-weight: 700; margin-bottom: 14px; }
+.sb-card-title { font-size: 15.5px; font-weight: 700; margin-bottom: 14px; display: flex; align-items: center; gap: 10px; }
+.sb-scenario-tag { font-size: 11px; font-weight: 700; color: var(--accent2); background: rgba(108,141,250,0.12); border: 1px solid rgba(108,141,250,0.3); padding: 3px 9px; border-radius: 20px; letter-spacing: .4px; }
 .sb-card-title.small { font-size: 13.5px; color: var(--muted); font-weight: 600; }
 .sb-card-title-row { display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 10px; }
-.sb-card-note { font-size: 12px; color: var(--muted); margin-top: 8px; }
+.sb-card-note { font-size: 12px; color: var(--muted); margin-top: 8px; line-height: 1.5; }
+.sb-card-note b { color: var(--text); }
 
 .sb-tabs { display: flex; gap: 6px; }
 .sb-tab { background: var(--panel2); border: 1px solid var(--line); color: var(--muted); padding: 6px 12px; border-radius: 20px; font-size: 12.5px; cursor: pointer; }
 .sb-tab.active { background: var(--accent2); border-color: var(--accent2); color: #06101f; font-weight: 700; }
 
-.sb-heatmap { display: flex; flex-direction: column; gap: 12px; margin-top: 6px; }
-.sb-coach-block { display: flex; align-items: flex-start; gap: 12px; }
-.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--muted); flex-shrink: 0; padding-top: 4px; }
+.sb-heatmap { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
+.sb-coach-block { display: flex; align-items: center; gap: 12px; }
+.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
 .sb-coach-grid { display: flex; flex-wrap: wrap; gap: 3px; }
-.sb-seat {
-  width: 22px; height: 22px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.06);
-  display: flex; align-items: center; justify-content: center;
-  font-family: 'IBM Plex Mono', monospace; font-size: 8.5px; font-weight: 600; color: rgba(6,16,31,0.65);
-  cursor: pointer; padding: 0; transition: transform .1s ease, outline .1s ease;
-}
-.sb-seat:hover { transform: scale(1.15); }
+.sb-seat { width: 10px; height: 10px; border-radius: 2px; border: none; cursor: pointer; padding: 0; transition: transform .1s ease, outline .1s ease; }
+.sb-seat:hover { transform: scale(1.3); }
 .sb-seat.selected { outline: 2px solid var(--accent2); outline-offset: 1px; }
 .sb-seat.free { background: var(--ok); }
 .sb-seat.partial { background: var(--warn); }
-.sb-seat.occupied { background: #2a3450; color: var(--muted); }
+.sb-seat.occupied { background: #2a3450; }
 
 .sb-legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; align-items: center; }
 .sb-legend-hint { font-style: italic; opacity: .8; }
