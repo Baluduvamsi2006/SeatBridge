@@ -508,6 +508,79 @@ export default function SeatBridge() {
           </div>
         </section>
       )}
+
+      {/* ---------- COACH EXPLORER ---------- */}
+      <section className="sb-card">
+        <div className="sb-card-title-row">
+          <div className="sb-card-title">Coach vacancy explorer</div>
+          <div className="sb-tabs">
+            {["SL", "3A", "2A"].map((t) => (
+              <button key={t} className={`sb-tab ${coachTab === t ? "active" : ""}`} onClick={() => setCoachTab(t)}>
+                {TYPE_LABEL[t]}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        <div className="sb-heatmap">
+          {heatmapCoaches.map((coach) => {
+            const coachSeats = displaySeats.filter((s) => s.coach === coach.code);
+            return (
+              <div className="sb-coach-block" key={coach.code}>
+                <div className="sb-coach-label">{coach.code}</div>
+                <div className="sb-coach-grid">
+                  {coachSeats.map((s) => {
+                    const freeHours = s.free.reduce((sum, f) => sum + (STATIONS[f.end].hour - STATIONS[f.start].hour), 0);
+                    const frac = TOTAL_HOURS > 0 ? freeHours / TOTAL_HOURS : 0;
+                    let cls = "occupied";
+                    if (frac > 0.85) cls = "free";
+                    else if (frac > 0) cls = "partial";
+                    return <div key={s.uid} className={`sb-seat ${cls}`} title={`${s.uid} · ${freeHours.toFixed(1)}h free`} />;
+                  })}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        <div className="sb-legend">
+          <span><i className="sb-dot free" /> mostly free</span>
+          <span><i className="sb-dot partial" /> fragment free</span>
+          <span><i className="sb-dot occupied" /> occupied</span>
+        </div>
+
+        <div className="sb-card-title-row" style={{ marginTop: 22 }}>
+          <div className="sb-card-title small">Vacant berth details — {TYPE_LABEL[coachTab]}</div>
+          <div className="sb-search">
+            <Search size={14} />
+            <input placeholder="search coach, berth, station…" value={berthFilter} onChange={(e) => setBerthFilter(e.target.value)} />
+          </div>
+        </div>
+        <div className="sb-table-wrap">
+          <table className="sb-table">
+            <thead>
+              <tr>
+                <th>From</th>
+                <th>To</th>
+                <th>Coach</th>
+                <th>Berth</th>
+              </tr>
+            </thead>
+            <tbody>
+              {berthRows.slice(0, 400).map((r, i) => (
+                <tr key={i}>
+                  <td>{STATIONS[r.from].name} ({stCode(r.from)})</td>
+                  <td>{STATIONS[r.to].name} ({stCode(r.to)})</td>
+                  <td>{r.coach}</td>
+                  <td>{r.berth}</td>
+                </tr>
+              ))}
+              {berthRows.length === 0 && (
+                <tr><td colSpan={4} className="sb-empty">No vacant fragments match.</td></tr>
+              )}
+            </tbody>
+          </table>
+        </div>
+      </section>
     </div>
   );
 }
