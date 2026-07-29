@@ -667,7 +667,7 @@ export default function SeatBridge() {
           </div>
           <div style={{ width: "100%", height: 320 }}>
             <ResponsiveContainer>
-              <BarChart data={compareData.rows as any} margin={{ top: 10, right: 20, left: -10, bottom: 0 }}>
+              <BarChart data={compareData.rows as any} margin={{ top: 25, right: 20, left: -10, bottom: 0 }}>
                 <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
                 <XAxis dataKey="k" tick={{ fill: "var(--muted)", fontSize: 12 }} label={{ value: "max seat changes", position: "insideBottom", offset: -2, fill: "var(--muted)", fontSize: 11 }} />
                 <YAxis tick={{ fill: "var(--muted)", fontSize: 12 }} unit="%" domain={[0, 100]} />
@@ -1055,15 +1055,20 @@ const CSS = `
 .sb-tab.active { background: var(--accent2); border-color: var(--accent2); color: #06101f; font-weight: 700; }
 
 .sb-heatmap { display: flex; flex-direction: column; gap: 10px; margin-top: 6px; }
-.sb-coach-block { display: flex; align-items: center; gap: 12px; }
-.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 12.5px; color: var(--muted); flex-shrink: 0; }
-.sb-coach-grid { display: flex; flex-wrap: wrap; gap: 3px; }
-.sb-seat { width: 10px; height: 10px; border-radius: 2px; border: none; cursor: pointer; padding: 0; transition: transform .1s ease, outline .1s ease; }
-.sb-seat:hover { transform: scale(1.3); }
-.sb-seat.selected { outline: 2px solid var(--accent2); outline-offset: 1px; }
+.sb-coach-block { display: flex; align-items: flex-start; gap: 12px; margin-bottom: 12px; }
+.sb-coach-label { width: 32px; font-family: 'IBM Plex Mono', monospace; font-size: 13px; font-weight: 700; color: var(--muted); flex-shrink: 0; padding-top: 5px; }
+.sb-coach-grid { display: flex; flex-wrap: wrap; gap: 4px; flex: 1; }
+.sb-seat { 
+  width: 26px; height: 26px; border-radius: 4px; border: 1px solid rgba(255,255,255,0.04); 
+  display: flex; align-items: center; justify-content: center;
+  font-family: 'IBM Plex Mono', monospace; font-size: 10.5px; font-weight: 700; color: #06101f;
+  cursor: pointer; padding: 0; transition: all .15s ease;
+}
+.sb-seat:hover { transform: translateY(-2px) scale(1.05); box-shadow: 0 4px 10px rgba(0,0,0,0.4); z-index: 2; position: relative; }
+.sb-seat.selected { outline: 2px solid var(--accent2); outline-offset: 2px; }
 .sb-seat.free { background: var(--ok); }
 .sb-seat.partial { background: var(--warn); }
-.sb-seat.occupied { background: #2a3450; }
+.sb-seat.occupied { background: #2a3450; color: var(--muted); border-color: transparent; }
 
 .sb-legend { display: flex; gap: 18px; margin-top: 12px; font-size: 12px; color: var(--muted); flex-wrap: wrap; align-items: center; }
 .sb-legend-hint { font-style: italic; opacity: .8; }
